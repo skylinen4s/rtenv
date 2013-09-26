@@ -104,6 +104,39 @@ struct task_control_block {
     struct task_control_block **prev;
     struct task_control_block  *next;
 };
+//global
+struct task_control_block tasks[TASK_LIMIT];
+size_t task_count = 0;
+
+//print
+void print_msg(char * msg)
+{
+	int fdout;
+	fdout = open("/tmp/mqueue/out", 0);
+
+    write(fdout , msg , strlen(msg) +1 );
+
+}
+//itoa
+void itoa(int n, char *buf)
+{
+	if (n == 0) *(buf++) = '0';
+	else {
+		if (n < 0) {
+			*(buf++) = '-';
+			n = -n;
+		}
+		int d = 1000;
+		while(d != 0){
+			int i = n / d;
+			if(i != 0){
+				*(buf++) = '0' + (i%10);
+			}
+			d/=10;
+		}
+	}
+	*buf = '\0';
+}
 
 /* 
  * pathserver assumes that all files are FIFOs that were registered
@@ -246,7 +279,7 @@ void serialin(USART_TypeDef* uart, unsigned int intr)
 void greeting()
 {
 	int fdout = open("/dev/tty0/out", 0);
-	char *string = "Hello, World!\n";
+	char *string = "\n\rHello Week#1 Homework!";
 	while (*string) {
 		write(fdout, string, 1);
 		string++;
@@ -314,6 +347,84 @@ void queue_str_task2()
 	queue_str_task("Hello 2\n", 50);
 }
 
+char *get_status(int status)
+{
+	switch(status){
+		case 0:
+			return "READY";
+		case 1:
+			return "WAIT_READ";
+		case 2:
+			return "WAIT_WRITE";
+		case 3:
+			return "WAIT_INTR";
+		case 4:
+			return "WAIT_TIME";
+		default:
+			return "UNKNOWN STATUS";
+	}
+}
+
+void task_info()
+{
+	int task;
+	print_msg(" PID  STATUS     PRIORITY\n\r");
+	for (task = 0; task < task_count; task++)
+	{
+		char task_pid[1];
+	//	char task_status[1];
+		char task_priority[2];
+
+		task_pid[0] = '0'+tasks[task].pid;
+	//	task_status[0] = '0'+tasks[task].status;
+		itoa(tasks[task].priority,task_priority);
+
+		print_msg(" ");
+		print_msg(&task_pid[0]);
+		print_msg("    ");
+		print_msg(get_status(tasks[task].status));
+		print_msg("\r\t\t ");
+		print_msg(&task_priority[0]);
+		print_msg("\n\r");
+	}
+}
+
+
+void help_info()
+{
+    print_msg(" Type 'help' to see this list.\n\r");
+    print_msg(" help         List all commands\n\r");
+    print_msg(" hello        Say hello\n\r");
+    print_msg(" ps           List all processes\n\r");
+	print_msg(" echo [WORD]  Show your input\n\r");
+}
+
+void check_input(char *str)
+{
+	if (!strncmp(str, "help", 4)){
+		help_info();
+	}
+	else if (!strncmp(str, "hello", 5)){
+		greeting();
+	}
+	else if (!strncmp(str, "ps", 2)){
+		task_info();
+	}
+	else if ((!strncmp(str, "echo ", 5) && (str[5]!=' '))){
+		print_msg(&str[5]);
+		print_msg("\n\r");
+	}
+	else{
+		if (!strncmp(str,"\0",1)){
+		}
+		else{
+			print_msg("'");
+			print_msg(&str[0]);
+			print_msg("': command not found\n\r");
+		}
+	}
+}
+
 void serial_readwrite_task()
 {
 	int fdout, fdin;
@@ -357,6 +468,49 @@ void serial_readwrite_task()
 		write(fdout, str, curr_char+1+1);
 	}
 }
+void serial_test_task()
+{
+	int fdout, fdin;
+	char str[100];
+	char ch;
+	char ch_out[2] = {'0','\0'};
+	char back[1] = {'\b'};
+	char space[1] = {' '};
+	int curr_char;
+	int done;
+
+	fdout = mq_open("/tmp/mqueue/out", 0);
+	fdin = open("/dev/tty0/in", 0);
+
+	while (1) {
+		curr_char = 0; //w 4
+		done = 0;
+		print_msg("@rtenv:~$ \0");
+		do {
+
+			read(fdin, &ch, 1);
+
+			if (curr_char >= 98 || (ch == '\r') || (ch == '\n')) {
+				print_msg("\n\r\0");
+				str[curr_char++] = '\0';
+				done = -1;
+			}
+			else if (ch == 0X7f && (curr_char != 0)){ //0X7f = backspace
+				
+					write(fdout, &back, 1);
+					write(fdout ,&space, 1);
+					str[curr_char--] = '\0';
+					write(fdout, &back, 1);
+			}
+			else if(ch != 0X7f){
+				str[curr_char++] = ch;
+				ch_out[0] = ch;
+				write(fdout, &ch_out, 2);
+			}
+		} while (!done);
+			check_input(str);
+	}
+}
 
 void first()
 {
@@ -366,9 +520,9 @@ void first()
 	if (!fork()) setpriority(0, 0), serialout(USART2, USART2_IRQn);
 	if (!fork()) setpriority(0, 0), serialin(USART2, USART2_IRQn);
 	if (!fork()) rs232_xmit_msg_task();
-	if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), queue_str_task1();
-	if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), queue_str_task2();
-	if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), serial_readwrite_task();
+//	if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), queue_str_task1();
+//	if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), queue_str_task2();
+	if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), serial_test_task();
 
 	setpriority(0, PRIORITY_LIMIT);
 
@@ -669,11 +823,10 @@ _mknod(struct pipe_ringbuffer *pipe, int dev)
 int main()
 {
 	unsigned int stacks[TASK_LIMIT][STACK_SIZE];
-	struct task_control_block tasks[TASK_LIMIT];
+	
 	struct pipe_ringbuffer pipes[PIPE_LIMIT];
 	struct task_control_block *ready_list[PRIORITY_LIMIT + 1];  /* [0 ... 39] */
 	struct task_control_block *wait_list = NULL;
-	size_t task_count = 0;
 	size_t current_task = 0;
 	size_t i;
 	struct task_control_block *task;
